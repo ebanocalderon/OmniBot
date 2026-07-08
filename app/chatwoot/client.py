@@ -99,7 +99,9 @@ class ChatwootClient:
         }
         resp = await self._http.post(create_url, json=body)
         resp.raise_for_status()
-        contact = resp.json()
+        raw = resp.json()
+        # Chatwoot wraps the created object in a 'payload' key in some versions
+        contact = raw.get("payload", raw) if isinstance(raw.get("payload"), dict) else raw
         logger.info(
             "Created Chatwoot contact id=%s for Telegram chat_id=%s",
             contact["id"],
@@ -147,7 +149,9 @@ class ChatwootClient:
         }
         resp = await self._http.post(create_url, json=body)
         resp.raise_for_status()
-        conversation = resp.json()
+        raw = resp.json()
+        # Chatwoot wraps the created object in a 'payload' key in some versions
+        conversation = raw.get("payload", raw) if isinstance(raw.get("payload"), dict) else raw
         logger.info(
             "Created conversation id=%s for contact_id=%s",
             conversation["id"],

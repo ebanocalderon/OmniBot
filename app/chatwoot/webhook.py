@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 from typing import Any, Dict
 
@@ -76,8 +77,10 @@ async def chatwoot_webhook(
             )
 
     # ── Parse payload ─────────────────────────────────────────────
+    # NOTE: raw_body was already read above; we must parse from it directly
+    # because request.json() would try to re-read the (now empty) stream.
     try:
-        payload: Dict[str, Any] = await request.json()
+        payload: Dict[str, Any] = json.loads(raw_body)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
