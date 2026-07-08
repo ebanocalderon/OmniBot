@@ -1,0 +1,26 @@
+[Unit]
+Description=Chatwoot <-> Telegram Bridge
+Documentation=https://github.com/ebanocalderon/OmniBot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bridge
+Group=bridge
+WorkingDirectory=/opt/chatwoot-bridge
+ExecStart=/opt/chatwoot-bridge/venv/bin/python run.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=chatwoot-bridge
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+EnvironmentFile=/opt/chatwoot-bridge/.env
+
+[Install]
+WantedBy=multi-user.target
