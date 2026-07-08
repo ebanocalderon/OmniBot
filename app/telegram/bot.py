@@ -13,6 +13,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import httpx
+
 from telegram import Bot, Update
 from telegram.constants import ParseMode
 from telegram.ext import (
@@ -25,7 +27,7 @@ from telegram.ext import (
 
 from app.chatwoot.client import chatwoot_client
 from app.config import settings
-from app.database import get_session_by_chat_id, upsert_session
+from app.database import delete_session, get_session_by_chat_id, upsert_session
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +95,47 @@ async def _ensure_chatwoot_session(update: Update) -> int | None:
         return None
 
 
+async def _send_to_chatwoot(update: Update, content: str, content_type: str = "text") -> bool:
+    """
+    Send a message to Chatwoot, transparently recovering if the conversation
+    was deleted on the Chatwoot side.
+    """
+    chat_id = update.effective_chat.id
+    conversation_id = await _ensure_chatwoot_session(update)
+    if not conversation_id:
+        return False
+
+    try:
+        await chatwoot_client.send_incoming_message(
+            conversation_id=conversation_id,
+            content=content,
+            content_type=content_type,
+        )
+        return True
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            logger.warning("Conversation %s not found (likely deleted). Resetting session for chat_id=%s.", conversation_id, chat_id)
+            await delete_session(chat_id)
+            # Retry once with a fresh session
+            conversation_id = await _ensure_chatwoot_session(update)
+            if conversation_id:
+                try:
+                    await chatwoot_client.send_incoming_message(
+                        conversation_id=conversation_id,
+                        content=content,
+                        content_type=content_type,
+                    )
+                    return True
+                except Exception as exc2:
+                    logger.exception("Failed to send message to Chatwoot after retry: %s", exc2)
+        else:
+            logger.exception("HTTP error sending to Chatwoot: %s", exc)
+    except Exception as exc:
+        logger.exception("Failed to send message to Chatwoot: %s", exc)
+    
+    return False
+
+
 # ── Command Handlers ──────────────────────────────────────────────────────────
 
 
@@ -157,25 +200,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not text.strip():
         return
 
-    conversation_id = await _ensure_chatwoot_session(update)
-    if not conversation_id:
-        await update.message.reply_text(
-            "❌ Could not reach the support system. Please try again later.",
-        )
-        return
-
-    try:
-        await chatwoot_client.send_incoming_message(
-            conversation_id=conversation_id,
-            content=text,
-        )
-        logger.info(
-            "Forwarded text from chat_id=%s to conversation_id=%s",
-            update.effective_chat.id,
-            conversation_id,
-        )
-    except Exception as exc:
-        logger.exception("Failed to send message to Chatwoot: %s", exc)
+    success = await _send_to_chatwoot(update, text, "text")
+    if success:
+        logger.info("Forwarded text from chat_id=%s", update.effective_chat.id)
+    else:
         await update.message.reply_text(
             "❌ Failed to send your message. Please try again.",
         )
@@ -190,11 +218,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if caption:
         content += f"\nCaption: {caption}"
 
-    conversation_id = await _ensure_chatwoot_session(update)
-    if conversation_id:
-        await chatwoot_client.send_incoming_message(
-            conversation_id=conversation_id, content=content
-        )
+    await _send_to_chatwoot(update, content)
 
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -205,23 +229,14 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     file_name = doc.file_name if doc else "unknown"
     content = f"[📎 File received: {file_name}]"
 
-    conversation_id = await _ensure_chatwoot_session(update)
-    if conversation_id:
-        await chatwoot_client.send_incoming_message(
-            conversation_id=conversation_id, content=content
-        )
+    await _send_to_chatwoot(update, content)
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Notify agent that a voice message was sent.
     """
-    conversation_id = await _ensure_chatwoot_session(update)
-    if conversation_id:
-        await chatwoot_client.send_incoming_message(
-            conversation_id=conversation_id,
-            content="[🎤 Voice message received]",
-        )
+    await _send_to_chatwoot(update, "[🎤 Voice message received]")
 
 
 async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -232,11 +247,7 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     emoji = sticker.emoji if sticker else ""
     content = f"[Sticker sent{': ' + emoji if emoji else ''}]"
 
-    conversation_id = await _ensure_chatwoot_session(update)
-    if conversation_id:
-        await chatwoot_client.send_incoming_message(
-            conversation_id=conversation_id, content=content
-        )
+    await _send_to_chatwoot(update, content)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

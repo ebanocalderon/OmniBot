@@ -112,3 +112,17 @@ async def upsert_session(
         telegram_chat_id,
         chatwoot_conversation_id,
     )
+
+
+async def delete_session(telegram_chat_id: int) -> None:
+    """
+    Delete the session for a given Telegram chat ID.
+    Used when a conversation is deleted in Chatwoot to force a new session.
+    """
+    async with aiosqlite.connect(settings.database_path) as db:
+        await db.execute(
+            "DELETE FROM sessions WHERE telegram_chat_id = ?",
+            (telegram_chat_id,),
+        )
+        await db.commit()
+    logger.info("Session deleted for chat_id=%s", telegram_chat_id)
