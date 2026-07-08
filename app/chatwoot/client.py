@@ -188,6 +188,34 @@ class ChatwootClient:
         )
         return msg
 
+    async def send_outgoing_message(
+        self,
+        conversation_id: int,
+        content: str,
+        content_type: str = "text",
+    ) -> Dict[str, Any]:
+        """
+        Post an outgoing (agent) message to a Chatwoot conversation.
+        message_type=outgoing means it appears on the right / agent side.
+        Useful for AI responses so agents see both sides of the conversation.
+        """
+        url = _api(f"/conversations/{conversation_id}/messages")
+        body = {
+            "content": content,
+            "message_type": "outgoing",
+            "content_type": content_type,
+            "private": False,
+        }
+        resp = await self._http.post(url, json=body)
+        resp.raise_for_status()
+        msg = resp.json()
+        logger.debug(
+            "Sent outgoing message id=%s to conversation_id=%s",
+            msg.get("id"),
+            conversation_id,
+        )
+        return msg
+
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
 

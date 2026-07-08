@@ -25,6 +25,8 @@ from telegram.ext import (
     filters,
 )
 
+from app.ai.client import clear_history as clear_ai_history
+from app.ai.client import get_ai_response
 from app.chatwoot.client import chatwoot_client
 from app.config import settings
 from app.database import delete_session, get_session_by_chat_id, upsert_session
@@ -156,6 +158,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Make sure a conversation exists right away
     await _ensure_chatwoot_session(update)
+    # Reset AI conversation history on /start
+    clear_ai_history(update.effective_chat.id)
     logger.info("User %s started the bot (chat_id=%s)", user.username or user.id, update.effective_chat.id)
 
 
@@ -194,19 +198,51 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Forward any plain text message from Telegram → Chatwoot.
+    Forward any plain text message from Telegram → Chatwoot,
+    then get an AI response and reply directly in Telegram.
     """
     text = update.message.text or ""
     if not text.strip():
         return
 
+    chat_id = update.effective_chat.id
+
+    # 1. Forward to Chatwoot for agent visibility
     success = await _send_to_chatwoot(update, text, "text")
     if success:
-        logger.info("Forwarded text from chat_id=%s", update.effective_chat.id)
+        logger.info("Forwarded text from chat_id=%s", chat_id)
     else:
         await update.message.reply_text(
             "❌ Failed to send your message. Please try again.",
         )
+
+    # 2. Get AI response if enabled
+    if settings.ai_enabled:
+        bot: Bot = get_application().bot
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action="typing")
+        except Exception:
+            pass
+
+        ai_reply = await get_ai_response(chat_id, text)
+
+        if ai_reply:
+            await send_telegram_message(chat_id=chat_id, text=ai_reply)
+
+            # 3. Also post AI response to Chatwoot so agents see it
+            conversation_id = await _ensure_chatwoot_session(update)
+            if conversation_id:
+                try:
+                    await chatwoot_client.send_outgoing_message(
+                        conversation_id=conversation_id,
+                        content=f"[AI] {ai_reply}",
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Could not send AI reply to Chatwoot conversation %s: %s",
+                        conversation_id,
+                        exc,
+                    )
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

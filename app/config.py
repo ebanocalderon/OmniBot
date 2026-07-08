@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     # ── Database ──────────────────────────────────────────────────
     database_path: str = Field(default="bridge.db", description="Path to the SQLite database file")
 
+    # ── AI Agent (Ollama) ─────────────────────────────────────────
+    ai_enabled: bool = Field(default=False, description="Enable AI auto-responder via Ollama")
+    ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama API base URL")
+    ollama_model: str = Field(default="llama3", description="Ollama model name (e.g. llama3, mistral)")
+    ai_system_prompt: str = Field(
+        default="You are a helpful support assistant. Be concise, friendly, and answer in the same language the user writes to you.",
+        description="System prompt for the AI model",
+    )
+    ai_max_history: int = Field(default=20, description="Max conversation turns to keep in memory per chat")
+
     # ── Logging ───────────────────────────────────────────────────
     log_level: str = Field(default="INFO", description="Python logging level")
 
