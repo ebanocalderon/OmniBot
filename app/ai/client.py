@@ -1,8 +1,8 @@
 """
-Async Ollama AI client.
+Async LiteLLM AI client.
 
 Provides a simple conversational AI that auto-responds to users
-via a locally-running Ollama instance.
+via any LLM supported by LiteLLM (Ollama, OpenAI, Anthropic, etc.).
 
 Maintains per-chat conversation history in memory.
 """
@@ -11,14 +11,18 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Optional
 
-import httpx
+import litellm
+from litellm import acompletion
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Drop litellm internal logging if needed
+litellm.suppress_debug_info = True
+
 # ── In-memory conversation history ────────────────────────────────────────────
-# {chat_id: [{"role": "system"|"user"|"assistant", "content": "..."}, ...]}
+# {conversation_id: [{"role": "system"|"user"|"assistant", "content": "..."}, ...]}
 _history: Dict[int, List[Dict[str, str]]] = {}
 
 
@@ -41,13 +45,8 @@ def _trim_history(chat_id: int) -> None:
 
 async def get_ai_response(chat_id: int, user_message: str) -> Optional[str]:
     """
-    Send a user message to Ollama and return the AI response.
-
-    Returns None if AI is disabled or an error occurs.
+    Send a user message to the configured LLM and return the AI response.
     """
-    if not settings.ai_enabled:
-        return None
-
     history = _get_history(chat_id)
 
     # Prepend system prompt on first message
@@ -56,54 +55,34 @@ async def get_ai_response(chat_id: int, user_message: str) -> Optional[str]:
 
     history.append({"role": "user", "content": user_message})
 
-    url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
-    body = {
-        "model": settings.ollama_model,
-        "messages": history,
-        "stream": False,
-        # Disable thinking/reasoning for faster responses on Qwen models
-        "think": False,
-    }
-
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
-            resp = await client.post(url, json=body)
-            resp.raise_for_status()
-            data = resp.json()
-            ai_content: str = data.get("message", {}).get("content", "")
-
-            if not ai_content:
-                logger.warning("Ollama returned empty response for chat_id=%s", chat_id)
-                history.pop()  # remove the user message we added
-                return None
-
-            history.append({"role": "assistant", "content": ai_content})
-            _trim_history(chat_id)
-
-            logger.info(
-                "AI response generated for chat_id=%s (%d chars)",
-                chat_id,
-                len(ai_content),
-            )
-            return ai_content
-
-    except httpx.ConnectError:
-        logger.error(
-            "Cannot connect to Ollama at %s — is it running?", settings.ollama_base_url
+        response = await acompletion(
+            model=settings.llm_model,
+            messages=history,
+            api_base=settings.llm_api_base if settings.llm_api_base else None,
+            api_key=settings.llm_api_key if settings.llm_api_key else None,
+            stream=False,
         )
-        history.pop()
-        return None
-    except httpx.HTTPStatusError as exc:
-        logger.error(
-            "Ollama HTTP error %s for chat_id=%s: %s",
-            exc.response.status_code,
+        
+        ai_content: str = response.choices[0].message.content
+        
+        if not ai_content:
+            logger.warning("LLM returned empty response for chat_id=%s", chat_id)
+            history.pop()  # remove the user message we added
+            return None
+
+        history.append({"role": "assistant", "content": ai_content})
+        _trim_history(chat_id)
+
+        logger.info(
+            "AI response generated for chat_id=%s (%d chars)",
             chat_id,
-            exc.response.text,
+            len(ai_content),
         )
-        history.pop()
-        return None
+        return ai_content
+
     except Exception as exc:
-        logger.exception("Unexpected error calling Ollama for chat_id=%s: %s", chat_id, exc)
+        logger.exception("Unexpected error calling LLM for chat_id=%s: %s", chat_id, exc)
         history.pop()
         return None
 

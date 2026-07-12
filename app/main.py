@@ -21,7 +21,6 @@ from fastapi.responses import JSONResponse
 from app.chatwoot.client import chatwoot_client
 from app.chatwoot.webhook import router as chatwoot_router
 from app.config import settings
-from app.database import init_db
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
 
@@ -34,42 +33,17 @@ logger = logging.getLogger(__name__)
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
-_telegram_task: asyncio.Task | None = None
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     Startup / shutdown logic executed by FastAPI around the application lifetime.
     """
-    global _telegram_task
-
     # ── Startup ───────────────────────────────────────────────────
     logger.info("=== Bridge starting up ===")
-
-    # 1. Create DB tables if they don't exist
-    await init_db()
-
-    # 2. Launch Telegram polling in the background
-    from app.telegram.bot import run_telegram_polling  # noqa: PLC0415
-
-    _telegram_task = asyncio.create_task(
-        run_telegram_polling(), name="telegram-polling"
-    )
-    logger.info("Telegram polling task started")
-
     yield  # ← application runs here
 
     # ── Shutdown ──────────────────────────────────────────────────
     logger.info("=== Bridge shutting down ===")
-
-    if _telegram_task and not _telegram_task.done():
-        _telegram_task.cancel()
-        try:
-            await _telegram_task
-        except asyncio.CancelledError:
-            pass
-        logger.info("Telegram polling task stopped")
 
     await chatwoot_client.aclose()
     logger.info("Chatwoot HTTP client closed")
@@ -78,10 +52,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # ── Application ───────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="Chatwoot ↔ Telegram Bridge",
+    title="Chatwoot AI Agent Bot",
     description=(
         "A local webhook server that bi-directionally connects a "
-        "self-hosted Chatwoot instance to a Telegram bot."
+        "self-hosted Chatwoot instance to any LLM (Ollama, OpenAI, Anthropic)."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -102,16 +76,14 @@ async def health() -> JSONResponse:
     Returns 200 OK when the server is running.
     Used by load balancers, Docker health checks, and monitoring tools.
     """
-    polling_alive = _telegram_task is not None and not _telegram_task.done()
     return JSONResponse(
         status_code=200,
         content={
-            "status": "ok",
-            "telegram_polling": polling_alive,
+            "status": "ok"
         },
     )
 
 
 @app.get("/", include_in_schema=False)
 async def root() -> JSONResponse:
-    return JSONResponse({"message": "Chatwoot ↔ Telegram Bridge is running. See /docs."})
+    return JSONResponse({"message": "Chatwoot AI Agent Bot is running. See /docs."})

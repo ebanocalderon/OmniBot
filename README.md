@@ -1,23 +1,21 @@
-# Chatwoot ↔ Telegram Bridge
+# Chatwoot AI Agent Bot (Universal LLM Integration)
 
-A production-ready Python bridge that **bi-directionally** connects a self-hosted [Chatwoot](https://www.chatwoot.com/) instance to a Telegram bot.
+A production-ready Python service that acts as an **Agent Bot** for [Chatwoot](https://www.chatwoot.com/). 
+It automatically replies to customer messages across **any inbox** using any LLM (Ollama, OpenAI, Anthropic, etc.) via LiteLLM.
 
 ```
-Telegram User  ──►  Bridge Server (10.0.0.41:8000)  ──►  Chatwoot (agent sees message)
-Chatwoot Agent ──►  Bridge Server (10.0.0.41:8000)  ──►  Telegram User (gets reply)
+Customer Message ──► Chatwoot Webhook ──► AI Agent Server (10.0.0.41:8000)
+AI Agent Server  ──► Queries LLM (e.g., local Ollama Qwen) ──► Chatwoot Agent Reply
 ```
 
 ---
 
 ## Features
 
-- ✅ Messages from Telegram → Chatwoot conversations (auto-creates contact + conversation)
-- ✅ Agent replies from Chatwoot → Telegram user
-- ✅ Persistent session mapping via SQLite (no duplicates across restarts)
+- ✅ Works across **any** Chatwoot inbox (Facebook, IG, WhatsApp, Web Widget, etc.)
+- ✅ Universal LLM support via LiteLLM (Ollama, OpenAI GPT-4, Anthropic Claude, etc.)
+- ✅ Context-aware: maintains conversation history in memory for follow-up questions
 - ✅ Optional HMAC-SHA256 webhook signature verification
-- ✅ Handles text, photos, documents, voice, and stickers
-- ✅ `/start`, `/help`, `/status` Telegram commands
-- ✅ FastAPI interactive docs at `/docs`
 - ✅ Health check endpoint at `/health`
 - ✅ Runs as a systemd service on Ubuntu (auto-restart on crash / reboot)
 
@@ -29,8 +27,8 @@ Chatwoot Agent ──►  Bridge Server (10.0.0.41:8000)  ──►  Telegram Us
 |---|---|
 | Python 3.11+ | |
 | A running Chatwoot instance | Self-hosted or cloud |
-| A Telegram Bot Token | From [@BotFather](https://t.me/BotFather) |
-| Ubuntu server (10.0.0.41) | For production deployment |
+| A Chatwoot Agent Bot | Configured via Rails console or API |
+| LLM API Access | Local Ollama, OpenAI API Key, Anthropic API Key, etc. |
 
 ---
 
@@ -46,7 +44,7 @@ ssh user@10.0.0.41
 
 ```bash
 git clone https://github.com/ebanocalderon/OmniBot.git
-cd chatwoot-telegram-bridge
+cd OmniBot
 ```
 
 ### 3. Run the automated deployment script
@@ -73,11 +71,14 @@ sudo nano /opt/chatwoot-bridge/.env
 Fill in all the required values:
 
 ```env
-TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 CHATWOOT_BASE_URL=http://localhost:3000
-CHATWOOT_API_TOKEN=your_api_token
+CHATWOOT_API_TOKEN=your_agent_bot_access_token
 CHATWOOT_ACCOUNT_ID=1
-CHATWOOT_INBOX_ID=1
+
+LLM_MODEL=ollama/qwen:3.50.8b
+LLM_API_BASE=http://localhost:11434
+LLM_API_KEY=
+
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8000
 ```
@@ -87,15 +88,34 @@ SERVER_PORT=8000
 ```bash
 sudo systemctl restart chatwoot-bridge
 curl http://10.0.0.41:8000/health
-# Expected: {"status":"ok","telegram_polling":true}
+# Expected: {"status":"ok"}
 ```
 
-### 6. Register the Chatwoot webhook
+### 6. Add the Bot to Chatwoot
 
-In Chatwoot: **Settings → Integrations → Webhooks → Add new webhook**
+In Chatwoot, an Agent Bot is an entity that listens to conversations and can reply. 
+You can create an Agent Bot using the Chatwoot Rails console:
 
-- URL: `http://10.0.0.41:8000/chatwoot/webhook`
-- Enable: ✅ **Message Created**
+```ruby
+# On your Chatwoot Server
+RAILS_ENV=production bundle exec rails c
+
+# Create the bot
+bot = AgentBot.create!(
+  name: "AI Assistant",
+  description: "Helpful AI",
+  outgoing_url: "http://10.0.0.41:8000/chatwoot/webhook"
+)
+
+# Generate an Access Token for the bot
+bot_access_token = bot.access_token.token
+puts "Your bot token is: #{bot_access_token}"
+
+# Add the bot to an Inbox (replace 1 with your inbox_id)
+AgentBotInbox.create!(inbox_id: 1, agent_bot_id: bot.id)
+```
+
+Use the `bot_access_token` as your `CHATWOOT_API_TOKEN` in the `.env` file.
 
 ---
 
@@ -105,7 +125,7 @@ In Chatwoot: **Settings → Integrations → Webhooks → Add new webhook**
 
 ```bash
 git clone https://github.com/ebanocalderon/OmniBot.git
-cd chatwoot-telegram-bridge
+cd OmniBot
 
 python -m venv venv
 
@@ -160,103 +180,3 @@ sudo systemctl stop chatwoot-bridge
 # Disable auto-start on boot
 sudo systemctl disable chatwoot-bridge
 ```
-
----
-
-## Updating the Service
-
-After pushing a new version to GitHub, on the server run:
-
-```bash
-sudo bash /opt/chatwoot-bridge/deploy/deploy.sh
-```
-
-Or manually:
-
-```bash
-cd /opt/chatwoot-bridge
-sudo git pull
-sudo -u bridge venv/bin/pip install -r requirements.txt -q
-sudo systemctl restart chatwoot-bridge
-```
-
----
-
-## Project Structure
-
-```
-chatwoot-telegram-bridge/
-├── .env.example           # Config template (commit this, NOT .env)
-├── .gitignore
-├── requirements.txt
-├── README.md
-├── run.py                 # Entry point
-│
-├── deploy/
-│   ├── chatwoot-bridge.service   # systemd unit file
-│   └── deploy.sh                 # Ubuntu deployment script
-│
-└── app/
-    ├── config.py          # pydantic-settings loader
-    ├── database.py        # SQLite session store
-    ├── main.py            # FastAPI app + lifespan
-    │
-    ├── chatwoot/
-    │   ├── client.py      # Async Chatwoot REST API wrapper
-    │   └── webhook.py     # POST /chatwoot/webhook handler
-    │
-    └── telegram/
-        └── bot.py         # Bot handlers + polling runner
-```
-
----
-
-## Environment Variables Reference
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `TELEGRAM_BOT_TOKEN` | ✅ | — | Bot token from @BotFather |
-| `CHATWOOT_BASE_URL` | ✅ | — | Your Chatwoot URL |
-| `CHATWOOT_API_TOKEN` | ✅ | — | Profile → Access Token |
-| `CHATWOOT_ACCOUNT_ID` | ✅ | — | Numeric account ID |
-| `CHATWOOT_INBOX_ID` | ✅ | — | API inbox numeric ID |
-| `SERVER_HOST` | ❌ | `0.0.0.0` | Bind address |
-| `SERVER_PORT` | ❌ | `8000` | Bind port |
-| `WEBHOOK_SECRET` | ❌ | `` | HMAC secret for Chatwoot webhook |
-| `DATABASE_PATH` | ❌ | `bridge.db` | SQLite file path |
-| `LOG_LEVEL` | ❌ | `INFO` | DEBUG/INFO/WARNING/ERROR |
-
----
-
-## Troubleshooting
-
-**Bot doesn't respond in Telegram**
-- Check that `TELEGRAM_BOT_TOKEN` is correct
-- `sudo journalctl -u chatwoot-bridge -n 50 --no-pager`
-- Make sure no other process is polling the same bot
-
-**Chatwoot doesn't receive messages**
-- Confirm `CHATWOOT_API_TOKEN`, `CHATWOOT_ACCOUNT_ID`, `CHATWOOT_INBOX_ID` are correct
-- The inbox must be of type **API**
-- Check `curl http://10.0.0.41:8000/health`
-
-**Agent replies don't reach Telegram**
-- Confirm the webhook URL `http://10.0.0.41:8000/chatwoot/webhook` is registered in Chatwoot
-- Check that the reply is not a private note
-- `sudo journalctl -u chatwoot-bridge -f` and watch for warnings
-
-**Chatwoot blocks local IP (SSRF Block/Failed to send message)**
-If you are running the bridge and Chatwoot on the same local network, Chatwoot will block outgoing webhooks to private IPs (e.g. `10.0.0.41`, `localhost`) by default, showing `Invalid webhook URL` or `Failed to send` in the UI. 
-
-To fix this:
-1. Open Chatwoot's `.env` file (e.g., `/root/.env` or `/home/chatwoot/chatwoot/.env`).
-2. Add or set these configuration values:
-   ```env
-   ENABLE_SSRF_PREVENTION=false
-   SAFE_FETCH_ALLOW_PRIVATE_NETWORK=true
-   ```
-3. Restart your Chatwoot service or Docker Compose stack (`docker compose down && docker compose up -d`).
-
-**Service won't start**
-- `sudo journalctl -u chatwoot-bridge -n 50 --no-pager`
-- Verify `/opt/chatwoot-bridge/.env` has all required values
