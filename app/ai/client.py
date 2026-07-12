@@ -66,6 +66,11 @@ async def get_ai_response(chat_id: int, user_message: str) -> Optional[str]:
         
         ai_content: str = response.choices[0].message.content
         
+        if ai_content:
+            import re
+            # Strip <think>...</think> reasoning blocks if present
+            ai_content = re.sub(r'<think>.*?</think>', '', ai_content, flags=re.DOTALL).strip()
+        
         if not ai_content:
             logger.warning("LLM returned empty response for chat_id=%s", chat_id)
             history.pop()  # remove the user message we added

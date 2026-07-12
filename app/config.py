@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     llm_api_base: str = Field(default="http://localhost:11434", description="API base URL (for local models or proxies)")
     llm_api_key: str = Field(default="", description="API Key for the provider (OpenAI, Anthropic, etc.)")
     ai_system_prompt: str = Field(
-        default="You are a helpful support assistant. Be concise, friendly, and answer in the same language the user writes to you.",
+        default="You are a helpful support assistant. Be concise, friendly, and answer in the same language the user writes to you. Do not output any thinking process or <think> tags; answer directly.",
         description="System prompt for the AI model",
     )
     ai_max_history: int = Field(default=20, description="Max conversation turns to keep in memory per chat")
