@@ -43,12 +43,7 @@ class Settings(BaseSettings):
     cal_api_key: str = Field(default="", description="Cal.com API key (e.g., cal_live_...)")
     cal_event_type_id: int = Field(default=0, description="Numeric event type ID from Cal.com")
 
-    # ── SMTP (Email Notifications) ────────────────────────────────
-    smtp_host: str = Field(default="", description="SMTP server host")
-    smtp_port: int = Field(default=587, description="SMTP server port")
-    smtp_username: str = Field(default="", description="SMTP server username")
-    smtp_password: str = Field(default="", description="SMTP server password")
-    smtp_from_email: str = Field(default="", description="Sender email address")
+    # ── Notification Email (Gmail API) ────────────────────────────
     notification_email: str = Field(default="", description="Recipient email address for lead notifications")
 
 
