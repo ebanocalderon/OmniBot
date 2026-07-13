@@ -137,3 +137,87 @@ async def create_booking(name: str, email: str, start_time_iso: str) -> str:
     except Exception as e:
         logger.exception("Unexpected error creating booking")
         return f"Error: {str(e)}"
+
+
+async def check_existing_bookings(email: str) -> str:
+    """
+    Check if an email already has active upcoming consultations.
+    Returns a formatted string of active bookings.
+    """
+    if not settings.cal_api_key:
+        return "Error: Cal.com credentials are not configured on the server."
+        
+    url = f"{CAL_API_URL}/bookings"
+    params = {"attendeeEmail": email}
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=_get_headers(), params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            bookings = data.get("data", [])
+            active_bookings = []
+            now_utc = datetime.now(timezone.utc)
+            
+            for b in bookings:
+                status = b.get("status")
+                # We care about accepted/upcoming bookings
+                if status in ["accepted", "upcoming"]:
+                    start_str = b.get("start")
+                    if start_str:
+                        # Parse start time
+                        dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                        if dt > now_utc:
+                            uid = b.get("uid")
+                            # Convert to EST
+                            dt_est = dt.astimezone(timezone(timedelta(hours=-4)))
+                            formatted_time = dt_est.strftime("%Y-%m-%d %I:%M %p EST")
+                            active_bookings.append({
+                                "uid": uid,
+                                "time": formatted_time
+                            })
+                            
+            if not active_bookings:
+                return f"No active upcoming consultations found for {email}."
+                
+            formatted = f"Active consultations found for {email}:\n"
+            for b in active_bookings:
+                formatted += f"- {b['time']} (Booking UID: {b['uid']})\n"
+            return formatted
+            
+    except httpx.HTTPError as e:
+        logger.error("Failed to check Cal.com bookings: %s", e)
+        return f"API Error checking existing bookings: {str(e)}"
+    except Exception as e:
+        logger.exception("Unexpected error checking existing bookings")
+        return f"Error: {str(e)}"
+
+
+async def cancel_booking(booking_uid: str) -> str:
+    """
+    Cancel an existing booking on Cal.com.
+    """
+    if not settings.cal_api_key:
+        return "Error: Cal.com credentials are not configured on the server."
+        
+    url = f"{CAL_API_URL}/bookings/{booking_uid}/cancel"
+    payload = {"cancellationReason": "User requested reschedule"}
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, headers=_get_headers(), json=payload)
+            resp.raise_for_status()
+            return f"Successfully cancelled booking (UID: {booking_uid})."
+    except httpx.HTTPError as e:
+        logger.error("Failed to cancel Cal.com booking: %s", e)
+        error_details = ""
+        if hasattr(e, "response") and e.response is not None:
+            try:
+                error_details = e.response.json()
+            except Exception:
+                error_details = e.response.text
+        return f"API Error cancelling booking: {str(e)} - {error_details}"
+    except Exception as e:
+        logger.exception("Unexpected error cancelling booking")
+        return f"Error: {str(e)}"

@@ -43,7 +43,7 @@ def _trim_history(chat_id: int) -> None:
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
-from app.ai.cal_client import fetch_slots, create_booking
+from app.ai.cal_client import fetch_slots, create_booking, check_existing_bookings, cancel_booking
 from app.chatwoot.client import chatwoot_client
 import json
 import re
@@ -90,6 +90,40 @@ TOOLS_SCHEMA = [
                 "required": ["name", "email", "date_time_iso"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_existing_bookings",
+            "description": "Check if a client already has active upcoming bookings on Cal.com using their email.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "description": "The client email to check."
+                    }
+                },
+                "required": ["email"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_booking",
+            "description": "Cancel an existing booking on Cal.com using its UID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "booking_uid": {
+                        "type": "string",
+                        "description": "The UID of the booking to cancel."
+                    }
+                },
+                "required": ["booking_uid"]
+            }
+        }
     }
 ]
 
@@ -102,6 +136,10 @@ async def _execute_tool_call(tool_call, contact_id: Optional[int] = None) -> str
         
         if func_name == "get_available_slots":
             return await fetch_slots(args.get("date"))
+        elif func_name == "check_existing_bookings":
+            return await check_existing_bookings(args.get("email"))
+        elif func_name == "cancel_booking":
+            return await cancel_booking(args.get("booking_uid"))
         elif func_name == "book_appointment":
             name = args.get("name")
             email = args.get("email")
@@ -219,6 +257,10 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
                 args = json.loads(args_str)
                 if func_name == "get_available_slots":
                     tool_result = await fetch_slots(args.get("date"))
+                elif func_name == "check_existing_bookings":
+                    tool_result = await check_existing_bookings(args.get("email"))
+                elif func_name == "cancel_booking":
+                    tool_result = await cancel_booking(args.get("booking_uid"))
                 elif func_name == "book_appointment":
                     name = args.get("name")
                     email = args.get("email")
