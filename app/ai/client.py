@@ -150,6 +150,7 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
                 api_key=settings.llm_api_key if settings.llm_api_key else None,
                 tools=TOOLS_SCHEMA,
                 stream=False,
+                num_retries=3,
             )
             message = response.choices[0].message
         except litellm.exceptions.BadRequestError as e:
@@ -201,6 +202,7 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
                 api_key=settings.llm_api_key if settings.llm_api_key else None,
                 tools=TOOLS_SCHEMA,
                 stream=False,
+                num_retries=3,
             )
             message = response.choices[0].message
 
@@ -250,6 +252,7 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
                 api_key=settings.llm_api_key if settings.llm_api_key else None,
                 tools=TOOLS_SCHEMA,
                 stream=False,
+                num_retries=3,
             )
             message = response.choices[0].message
             ai_content = message.content or ""
