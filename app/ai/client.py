@@ -265,8 +265,10 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
             message = MockMessage(failed_gen)
         
         # Check if model wants to call tools natively
-        if hasattr(message, "tool_calls") and message.tool_calls:
-            logger.info("LLM requested native tool calls for chat_id=%s", chat_id)
+        max_tool_iterations = 5
+        iterations = 0
+        while hasattr(message, "tool_calls") and message.tool_calls and iterations < max_tool_iterations:
+            logger.info("LLM requested native tool calls for chat_id=%s (iteration %d)", chat_id, iterations+1)
             # Append the assistant's tool call request to history
             history.append(message.model_dump(exclude_none=True))
             
@@ -281,7 +283,7 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
                     "content": result
                 })
                 
-            # Second LLM call to get final response after tool execution
+            # Next LLM call to get final response or another tool call
             response = await acompletion_with_retry(
                 model=settings.llm_model,
                 messages=history,
@@ -292,6 +294,10 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
                 num_retries=3,
             )
             message = response.choices[0].message
+            iterations += 1
+
+        if hasattr(message, "tool_calls") and message.tool_calls:
+            logger.warning("Max tool iterations reached for chat_id=%s", chat_id)
 
         ai_content: str = message.content or ""
         
