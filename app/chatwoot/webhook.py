@@ -118,7 +118,8 @@ async def chatwoot_webhook(
     # but for simplicity and Chatwoot's timeout, we await it. 
     # If the LLM is slow, we might need a background task. 
     # For now, we await it directly.
-    ai_reply = await get_ai_response(conversation_id, content)
+    contact_id = payload.get("meta", {}).get("sender", {}).get("id")
+    ai_reply = await get_ai_response(conversation_id, content, contact_id)
 
     if not ai_reply:
         logger.warning("AI did not return a response for conversation_id=%s", conversation_id)

@@ -39,11 +39,24 @@ class Settings(BaseSettings):
     # ── Logging ───────────────────────────────────────────────────
     log_level: str = Field(default="INFO", description="Python logging level")
 
+    # ── Cal.com ───────────────────────────────────────────────────
+    cal_api_key: str = Field(default="", description="Cal.com API key (e.g., cal_live_...)")
+    cal_event_type_id: int = Field(default=0, description="Numeric event type ID from Cal.com")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return a cached singleton Settings instance."""
-    return Settings()
+    import os
+    s = Settings()
+    prompt_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "system_prompt.txt")
+    if os.path.exists(prompt_file):
+        try:
+            with open(prompt_file, "r", encoding="utf-8") as f:
+                s.ai_system_prompt = f.read().strip()
+        except Exception:
+            pass
+    return s
 
 
 # Convenient module-level alias

@@ -1,0 +1,13 @@
+[Unit]
+Description=Ngrok Tunnel for Chatwoot
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/ngrok http 3000 --log=stdout
+Restart=on-failure
+User=ebanocalderon
+WorkingDirectory=/home/ebanocalderon
+Environment=HOME=/home/ebanocalderon
+
+[Install]
+WantedBy=multi-user.target

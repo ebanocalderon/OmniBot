@@ -80,6 +80,31 @@ class ChatwootClient:
         )
         return msg
 
+    async def update_contact(
+        self,
+        contact_id: int,
+        name: str,
+        email: str,
+    ) -> Dict[str, Any]:
+        """
+        Update contact details (name and email) in Chatwoot CRM.
+        """
+        url = _api(f"/contacts/{contact_id}")
+        body = {
+            "name": name,
+            "email": email,
+        }
+        resp = await self._http.put(url, json=body)
+        resp.raise_for_status()
+        contact = resp.json()
+        logger.info(
+            "Updated Chatwoot contact id=%s name=%s email=%s",
+            contact_id,
+            name,
+            email,
+        )
+        return contact
+
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
 
