@@ -124,6 +124,17 @@ async def create_booking(name: str, email: str, start_time_iso: str) -> str:
         # Parse start and end time
         clean_time = start_time_iso.replace("Z", "+00:00")
         dt_start = datetime.fromisoformat(clean_time)
+        
+        # Validate business hours in EST (UTC-4)
+        est = timezone(timedelta(hours=-4))
+        dt_start_est = dt_start.astimezone(est)
+        
+        if dt_start_est.hour < 9 or dt_start_est.hour >= 17:
+            return f"Error: Cannot book appointment at {dt_start_est.strftime('%I:%M %p EST')}. Business hours are strictly 9:00 AM to 5:00 PM EST. Please ask the client to choose another time."
+            
+        if dt_start_est.weekday() >= 5:
+            return f"Error: Cannot book appointment on a weekend. Business hours are Monday through Friday. Please ask the client to choose another time."
+            
         dt_end = dt_start + timedelta(minutes=30)
         
         start_str = dt_start.strftime("%Y-%m-%dT%H:%M:%SZ")
