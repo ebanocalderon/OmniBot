@@ -83,6 +83,9 @@ async def fetch_slots(date_str: str) -> str:
             if not available_times:
                 return f"No available slots found for {date_str}."
                 
+            # Limit to at most 6 slots to stay under LLM TPM limits
+            available_times = available_times[:6]
+                
             formatted = f"Available slots for {date_str} (UTC):\n" + "\n".join([f"- {t}" for t in available_times])
             return formatted
             
