@@ -244,5 +244,9 @@ async def cancel_booking(booking_uid: str) -> str:
         await asyncio.to_thread(delete_query.execute)
         return f"Successfully cancelled booking (UID: {booking_uid})."
     except Exception as e:
+        from googleapiclient.errors import HttpError
+        if isinstance(e, HttpError) and e.resp.status in [404, 410]:
+            logger.info("Event %s was already deleted on Google Calendar.", booking_uid)
+            return f"Successfully cancelled booking (UID: {booking_uid})."
         logger.exception("Error cancelling Google Calendar booking")
         return f"Error cancelling booking: {str(e)}"
