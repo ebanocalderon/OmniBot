@@ -89,6 +89,17 @@ async def chatwoot_webhook(
 
     logger.debug("Received Chatwoot event: %s (type=%s)", event, message_type)
 
+    # ── Clear history on status change to pending ─────────────────
+    if event == "conversation_status_changed":
+        new_status = payload.get("status")
+        conv_id = payload.get("id")
+        if new_status == "pending" and conv_id:
+            from app.ai.client import clear_history
+            clear_history(conv_id)
+            logger.info("Cleared history for conversation_id=%s due to status change to pending", conv_id)
+            return {"status": "ok", "reason": "cleared history"}
+        return {"status": "ignored", "reason": f"status change to {new_status} ignored"}
+
     # ── Filter: only incoming customer messages ────────────────────
     if event != "message_created":
         return {"status": "ignored", "reason": "event not message_created"}
@@ -107,6 +118,12 @@ async def chatwoot_webhook(
     conversation_id: int = conversation.get("id", 0)
     if not conversation_id:
         return {"status": "ignored", "reason": "missing conversation id"}
+
+    # ── Mute Bot / Human Intervention ──────────────────────────────
+    status: str = conversation.get("status", "")
+    if status in ("open", "resolved"):
+        logger.debug("Ignoring conversation_id=%s because status is '%s'", conversation_id, status)
+        return {"status": "ignored", "reason": f"conversation status is {status} (bot muted)"}
 
     # ── Fetch AI Response ──────────────────────────────────────────
     from app.ai.client import get_ai_response

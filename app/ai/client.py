@@ -149,6 +149,28 @@ TOOLS_SCHEMA = [
                 }
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "handoff_to_human",
+            "description": "Hand off the conversation to a human agent.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_conversation",
+            "description": "Mark the conversation as resolved (closed).",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
     }
 ]
 
@@ -202,6 +224,29 @@ async def _execute_tool_call(tool_call, contact_id: Optional[int] = None, chat_i
                     logger.error("Failed to trigger booking notification task: %s", ex)
                     
             return booking_result
+        elif func_name == "handoff_to_human":
+            if chat_id:
+                try:
+                    await chatwoot_client.update_conversation_status(chat_id, "open")
+                    await chatwoot_client.send_outgoing_message(
+                        conversation_id=chat_id,
+                        content="⚠️ The AI has handed off this conversation to a human agent.",
+                        private=True
+                    )
+                    return "Success: Conversation handed off to human agent. You MUST stop generating responses now."
+                except Exception as e:
+                    logger.error("Failed to handoff conversation: %s", e)
+                    return f"Error handing off: {e}"
+            return "Error: chat_id not provided for handoff."
+        elif func_name == "resolve_conversation":
+            if chat_id:
+                try:
+                    await chatwoot_client.update_conversation_status(chat_id, "resolved")
+                    return "Success: Conversation marked as resolved. You MUST stop generating responses now."
+                except Exception as e:
+                    logger.error("Failed to resolve conversation: %s", e)
+                    return f"Error resolving: {e}"
+            return "Error: chat_id not provided for resolution."
         else:
             return f"Error: Unknown tool {func_name}"
     except Exception as e:
@@ -215,6 +260,29 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
     Supports tool calling for Cal.com integration.
     """
     history = _get_history(chat_id)
+    
+    # If the history contains a handoff tool call, it means the conversation was previously handed off.
+    # If we are here processing a new message, it means the conversation was set back to pending.
+    # In this case, we clear the history so the bot resumes fresh.
+    has_handoff = False
+    for msg in history:
+        if msg.get("role") == "tool" and msg.get("name") == "handoff_to_human":
+            has_handoff = True
+            break
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            for tc in msg.get("tool_calls"):
+                # Handle dict or object
+                tc_name = tc.get("function", {}).get("name") if isinstance(tc, dict) else getattr(getattr(tc, "function", None), "name", None)
+                if tc_name == "handoff_to_human":
+                    has_handoff = True
+                    break
+            if has_handoff:
+                break
+                
+    if has_handoff:
+        logger.info("Previous handoff detected in history for chat_id=%s. Clearing history to resume fresh.", chat_id)
+        clear_history(chat_id)
+        history = _get_history(chat_id)
 
     # Prepend system prompt on first message
     if not history:
@@ -298,6 +366,16 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
 
         if hasattr(message, "tool_calls") and message.tool_calls:
             logger.warning("Max tool iterations reached for chat_id=%s", chat_id)
+            try:
+                await chatwoot_client.update_conversation_status(chat_id, "open")
+                await chatwoot_client.send_outgoing_message(
+                    conversation_id=chat_id,
+                    content="⚠️ The AI reached the maximum number of tool iterations (possible loop) and has deactivated itself. Human intervention required.",
+                    private=True
+                )
+            except Exception as handoff_e:
+                logger.error("Failed to handoff after max iterations: %s", handoff_e)
+            return None
 
         ai_content: str = message.content or ""
         
@@ -342,6 +420,25 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
                                 asyncio.create_task(send_booking_notification(name, email, date_time_iso, list(history)))
                             except Exception as ex:
                                 logger.error("Failed to trigger fallback booking notification task: %s", ex)
+                elif func_name == "handoff_to_human":
+                    try:
+                        await chatwoot_client.update_conversation_status(chat_id, "open")
+                        await chatwoot_client.send_outgoing_message(
+                            conversation_id=chat_id,
+                            content="⚠️ The AI has handed off this conversation to a human agent.",
+                            private=True
+                        )
+                        tool_result = "Success: Conversation handed off to human agent. You MUST stop generating responses now."
+                    except Exception as e:
+                        logger.error("Failed to handoff conversation: %s", e)
+                        tool_result = f"Error handing off: {e}"
+                elif func_name == "resolve_conversation":
+                    try:
+                        await chatwoot_client.update_conversation_status(chat_id, "resolved")
+                        tool_result = "Success: Conversation marked as resolved. You MUST stop generating responses now."
+                    except Exception as e:
+                        logger.error("Failed to resolve conversation: %s", e)
+                        tool_result = f"Error resolving: {e}"
                 else:
                     tool_result = f"Error: Unknown tool {func_name}"
             except Exception as e:
@@ -388,6 +485,15 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
 
     except Exception as exc:
         logger.exception("Unexpected error calling LLM for chat_id=%s: %s", chat_id, exc)
+        try:
+            await chatwoot_client.update_conversation_status(chat_id, "open")
+            await chatwoot_client.send_outgoing_message(
+                conversation_id=chat_id,
+                content=f"⚠️ The AI encountered a critical error and has deactivated itself. Human intervention required. Error: {str(exc)}",
+                private=True
+            )
+        except Exception as handoff_e:
+            logger.error("Failed to handoff on exception: %s", handoff_e)
         history.pop()
         return None
 

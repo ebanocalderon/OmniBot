@@ -57,28 +57,53 @@ class ChatwootClient:
         conversation_id: int,
         content: str,
         content_type: str = "text",
+        private: bool = False,
     ) -> Dict[str, Any]:
         """
-        Post an outgoing (agent) message to a Chatwoot conversation.
+        Post an outgoing (agent) message or private note to a Chatwoot conversation.
         message_type=outgoing means it appears on the right / agent side.
-        Useful for AI responses so agents see both sides of the conversation.
         """
         url = _api(f"/conversations/{conversation_id}/messages")
         body = {
             "content": content,
             "message_type": "outgoing",
             "content_type": content_type,
-            "private": False,
+            "private": private,
         }
         resp = await self._http.post(url, json=body)
         resp.raise_for_status()
         msg = resp.json()
         logger.debug(
-            "Sent outgoing message id=%s to conversation_id=%s",
+            "Sent %s message id=%s to conversation_id=%s",
+            "private" if private else "outgoing",
             msg.get("id"),
             conversation_id,
         )
         return msg
+
+    async def update_conversation_status(
+        self,
+        conversation_id: int,
+        status: str,
+    ) -> Dict[str, Any]:
+        """
+        Update conversation status (e.g., 'open', 'resolved', 'pending', 'snoozed', 'bot').
+        Changing from 'bot' or 'pending' to 'open' hands the conversation to a human.
+        Changing to 'resolved' closes the chat.
+        """
+        url = _api(f"/conversations/{conversation_id}/toggle_status")
+        body = {
+            "status": status
+        }
+        resp = await self._http.post(url, json=body)
+        resp.raise_for_status()
+        conversation = resp.json()
+        logger.info(
+            "Updated conversation_id=%s to status=%s",
+            conversation_id,
+            status,
+        )
+        return conversation
 
     async def update_contact(
         self,
