@@ -13,6 +13,8 @@ from typing import Dict, List, Optional
 
 import litellm
 from litellm import acompletion
+import asyncio
+import re
 
 from app.config import settings
 
@@ -20,6 +22,25 @@ logger = logging.getLogger(__name__)
 
 # Drop litellm internal logging if needed
 litellm.suppress_debug_info = True
+
+async def acompletion_with_retry(*args, **kwargs):
+    max_attempts = 4
+    for attempt in range(max_attempts):
+        try:
+            return await acompletion(*args, **kwargs)
+        except litellm.exceptions.RateLimitError as e:
+            if attempt == max_attempts - 1:
+                raise e
+            wait_time = 10.0
+            try:
+                err_msg = str(e)
+                match = re.search(r'try again in (\d+\.?\d*)s', err_msg)
+                if match:
+                    wait_time = float(match.group(1)) + 0.5
+            except Exception:
+                pass
+            logger.warning("Rate limit hit. Waiting for %.2f seconds before retry %d...", wait_time, attempt + 1)
+            await asyncio.sleep(wait_time)
 
 # ── In-memory conversation history ────────────────────────────────────────────
 # {conversation_id: [{"role": "system"|"user"|"assistant", "content": "..."}, ...]}
@@ -181,7 +202,7 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
     try:
         # First LLM call
         try:
-            response = await acompletion(
+            response = await acompletion_with_retry(
                 model=settings.llm_model,
                 messages=history,
                 api_base=settings.llm_api_base if settings.llm_api_base else None,
@@ -233,7 +254,7 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
                 })
                 
             # Second LLM call to get final response after tool execution
-            response = await acompletion(
+            response = await acompletion_with_retry(
                 model=settings.llm_model,
                 messages=history,
                 api_base=settings.llm_api_base if settings.llm_api_base else None,
@@ -287,7 +308,7 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
             })
             
             # Second LLM call for text fallback
-            response = await acompletion(
+            response = await acompletion_with_retry(
                 model=settings.llm_model,
                 messages=history,
                 api_base=settings.llm_api_base if settings.llm_api_base else None,
