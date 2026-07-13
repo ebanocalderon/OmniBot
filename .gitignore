@@ -37,3 +37,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Google OAuth credentials
+credentials.json
+token.json

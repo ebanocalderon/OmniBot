@@ -64,7 +64,15 @@ def _trim_history(chat_id: int) -> None:
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
-from app.ai.cal_client import fetch_slots, create_booking, check_existing_bookings, cancel_booking
+import os
+USE_GOOGLE_CALENDAR = os.getenv("USE_GOOGLE_CALENDAR", "false").lower() in ("true", "1", "yes")
+
+if USE_GOOGLE_CALENDAR:
+    from app.ai.gcal_client import fetch_slots, create_booking, check_existing_bookings, cancel_booking
+    logger.info("Using Google Calendar integration")
+else:
+    from app.ai.cal_client import fetch_slots, create_booking, check_existing_bookings, cancel_booking
+    logger.info("Using Cal.com integration")
 from app.chatwoot.client import chatwoot_client
 import json
 import re
