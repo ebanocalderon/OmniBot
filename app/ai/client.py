@@ -152,7 +152,7 @@ TOOLS_SCHEMA = [
     }
 ]
 
-async def _execute_tool_call(tool_call, contact_id: Optional[int] = None) -> str:
+async def _execute_tool_call(tool_call, contact_id: Optional[int] = None, chat_id: Optional[int] = None) -> str:
     """Execute a single tool call and return its result as a string."""
     func_name = tool_call.function.name
     try:
@@ -190,7 +190,18 @@ async def _execute_tool_call(tool_call, contact_id: Optional[int] = None) -> str
                 except Exception as e:
                     logger.error("Failed to update Chatwoot CRM contact: %s", e)
             
-            return await create_booking(name, email, args.get("date_time_iso"))
+            booking_result = await create_booking(name, email, date_time_iso)
+            
+            # Send booking notification email in the background
+            if chat_id and "Successfully booked" in booking_result:
+                try:
+                    from app.utils.email import send_booking_notification
+                    history = _get_history(chat_id)
+                    asyncio.create_task(send_booking_notification(name, email, date_time_iso, list(history)))
+                except Exception as ex:
+                    logger.error("Failed to trigger booking notification task: %s", ex)
+                    
+            return booking_result
         else:
             return f"Error: Unknown tool {func_name}"
     except Exception as e:
@@ -261,7 +272,7 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
             
             # Execute all tools
             for tool_call in message.tool_calls:
-                result = await _execute_tool_call(tool_call, contact_id=contact_id)
+                result = await _execute_tool_call(tool_call, contact_id=contact_id, chat_id=chat_id)
                 # Append tool result
                 history.append({
                     "role": "tool",
@@ -302,16 +313,29 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
                 elif func_name == "book_appointment":
                     name = args.get("name")
                     email = args.get("email")
+                    date_time_iso = args.get("date_time_iso")
                     
-                    # Update Chatwoot CRM contact
-                    if contact_id:
-                        try:
-                            logger.info("Updating Chatwoot CRM contact_id=%s with name=%s, email=%s (fallback)", contact_id, name, email)
-                            await chatwoot_client.update_contact(contact_id, name, email)
-                        except Exception as e:
-                            logger.error("Failed to update Chatwoot CRM contact (fallback): %s", e)
-                            
-                    tool_result = await create_booking(name, email, args.get("date_time_iso"))
+                    if not name or not email or not date_time_iso:
+                        tool_result = "Error: Missing required parameters ('name', 'email', 'date_time_iso') for booking."
+                    else:
+                        # Update Chatwoot CRM contact
+                        if contact_id:
+                            try:
+                                logger.info("Updating Chatwoot CRM contact_id=%s with name=%s, email=%s (fallback)", contact_id, name, email)
+                                await chatwoot_client.update_contact(contact_id, name, email)
+                            except Exception as e:
+                                logger.error("Failed to update Chatwoot CRM contact (fallback): %s", e)
+                                
+                        tool_result = await create_booking(name, email, date_time_iso)
+                        
+                        # Send booking notification email in the background
+                        if chat_id and "Successfully booked" in tool_result:
+                            try:
+                                from app.utils.email import send_booking_notification
+                                history = _get_history(chat_id)
+                                asyncio.create_task(send_booking_notification(name, email, date_time_iso, list(history)))
+                            except Exception as ex:
+                                logger.error("Failed to trigger fallback booking notification task: %s", ex)
                 else:
                     tool_result = f"Error: Unknown tool {func_name}"
             except Exception as e:

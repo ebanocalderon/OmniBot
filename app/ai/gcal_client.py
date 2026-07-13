@@ -160,7 +160,8 @@ async def create_booking(name: str, email: str, start_time_iso: str) -> str:
         insert_query = service.events().insert(
             calendarId='primary',
             body=event,
-            conferenceDataVersion=1
+            conferenceDataVersion=1,
+            sendUpdates='all'
         )
         
         created_event = await asyncio.to_thread(insert_query.execute)
