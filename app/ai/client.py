@@ -82,7 +82,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "get_available_slots",
-            "description": "Fetch available booking slots for a specific date on Cal.com.",
+            "description": "Fetch available booking slots for a specific date.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -90,8 +90,7 @@ TOOLS_SCHEMA = [
                         "type": "string",
                         "description": "The date to check slots for, in YYYY-MM-DD format (e.g. '2026-07-15')."
                     }
-                },
-                "required": ["date"]
+                }
             }
         }
     },
@@ -99,7 +98,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "book_appointment",
-            "description": "Book an appointment on Cal.com.",
+            "description": "Book an appointment.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -115,8 +114,7 @@ TOOLS_SCHEMA = [
                         "type": "string",
                         "description": "The exact start time of the booking in ISO 8601 format (UTC), e.g. '2026-07-15T09:00:00Z'."
                     }
-                },
-                "required": ["name", "email", "date_time_iso"]
+                }
             }
         }
     },
@@ -124,7 +122,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "check_existing_bookings",
-            "description": "Check if a client already has active upcoming bookings on Cal.com using their email.",
+            "description": "Check if a client already has active upcoming bookings using their email.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -132,8 +130,7 @@ TOOLS_SCHEMA = [
                         "type": "string",
                         "description": "The client email to check."
                     }
-                },
-                "required": ["email"]
+                }
             }
         }
     },
@@ -141,7 +138,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "cancel_booking",
-            "description": "Cancel an existing booking on Cal.com using its UID.",
+            "description": "Cancel an existing booking using its UID.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -149,8 +146,7 @@ TOOLS_SCHEMA = [
                         "type": "string",
                         "description": "The UID of the booking to cancel."
                     }
-                },
-                "required": ["booking_uid"]
+                }
             }
         }
     }
@@ -164,14 +160,27 @@ async def _execute_tool_call(tool_call, contact_id: Optional[int] = None) -> str
         logger.info("Executing tool %s with args %s", func_name, args)
         
         if func_name == "get_available_slots":
-            return await fetch_slots(args.get("date"))
+            date = args.get("date")
+            if not date:
+                return "Error: Please specify the 'date' parameter in YYYY-MM-DD format (e.g., '2026-07-15')."
+            return await fetch_slots(date)
         elif func_name == "check_existing_bookings":
-            return await check_existing_bookings(args.get("email"))
+            email = args.get("email")
+            if not email:
+                return "Error: Please specify the 'email' parameter."
+            return await check_existing_bookings(email)
         elif func_name == "cancel_booking":
-            return await cancel_booking(args.get("booking_uid"))
+            booking_uid = args.get("booking_uid")
+            if not booking_uid:
+                return "Error: Please specify the 'booking_uid' parameter."
+            return await cancel_booking(booking_uid)
         elif func_name == "book_appointment":
             name = args.get("name")
             email = args.get("email")
+            date_time_iso = args.get("date_time_iso")
+            
+            if not name or not email or not date_time_iso:
+                return "Error: Missing required parameters ('name', 'email', 'date_time_iso') for booking."
             
             # If contact_id is provided, update Chatwoot CRM contact
             if contact_id:
