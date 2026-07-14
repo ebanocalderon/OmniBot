@@ -17,7 +17,7 @@ import json
 import logging
 from typing import Any, Dict
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Header, HTTPException, Request, status, BackgroundTasks
 
 from app.config import settings
 
@@ -41,12 +41,38 @@ def _verify_signature(raw_body: bytes, signature_header: str) -> bool:
     return hmac.compare_digest(expected, signature_header)
 
 
+# ── Background Task ─────────────────────────────────────────────────────────────
+
+async def process_and_reply(conversation_id: int, content: str, contact_id: int):
+    """
+    Fetch the AI response and send it back to Chatwoot.
+    Runs in the background to avoid blocking the webhook response.
+    """
+    from app.ai.client import get_ai_response
+    from app.chatwoot.client import chatwoot_client
+    
+    try:
+        ai_reply = await get_ai_response(conversation_id, content, contact_id)
+        if not ai_reply:
+            logger.warning("AI did not return a response for conversation_id=%s", conversation_id)
+            return
+
+        await chatwoot_client.send_outgoing_message(
+            conversation_id=conversation_id,
+            content=ai_reply
+        )
+        logger.info("Successfully replied to conversation_id=%s", conversation_id)
+    except Exception as exc:
+        logger.exception("Failed to process AI response or reply to Chatwoot: %s", exc)
+
+
 # ── Endpoint ──────────────────────────────────────────────────────────────────
 
 
 @router.post("/webhook", status_code=status.HTTP_200_OK)
 async def chatwoot_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_chatwoot_signature: str = Header(default=""),
 ) -> Dict[str, str]:
     """
@@ -125,31 +151,14 @@ async def chatwoot_webhook(
         logger.debug("Ignoring conversation_id=%s because status is '%s'", conversation_id, status)
         return {"status": "ignored", "reason": f"conversation status is {status} (bot muted)"}
 
-    # ── Fetch AI Response ──────────────────────────────────────────
-    from app.ai.client import get_ai_response
-    from app.chatwoot.client import chatwoot_client
-
-    logger.info("Processing message for conversation_id=%s", conversation_id)
+    # ── Fetch AI Response in Background ──────────────────────────────
+    logger.info("Queued processing for message in conversation_id=%s", conversation_id)
+    
+    # In 'message_created' events, the customer's contact ID is under 'sender.id'
+    contact_id = payload.get("sender", {}).get("id")
     
     # Process asynchronously to not block the webhook response,
-    # but for simplicity and Chatwoot's timeout, we await it. 
-    # If the LLM is slow, we might need a background task. 
-    # For now, we await it directly.
-    contact_id = payload.get("contact", {}).get("id")
-    ai_reply = await get_ai_response(conversation_id, content, contact_id)
+    # avoiding Chatwoot's timeout error which causes accidental handoffs.
+    background_tasks.add_task(process_and_reply, conversation_id, content, contact_id)
 
-    if not ai_reply:
-        logger.warning("AI did not return a response for conversation_id=%s", conversation_id)
-        return {"status": "ignored", "reason": "AI response was empty or disabled"}
-
-    # ── Reply back to Chatwoot ─────────────────────────────────────
-    try:
-        await chatwoot_client.send_outgoing_message(
-            conversation_id=conversation_id,
-            content=ai_reply
-        )
-        logger.info("Successfully replied to conversation_id=%s", conversation_id)
-        return {"status": "ok"}
-    except Exception as exc:
-        logger.exception("Failed to send AI reply to Chatwoot: %s", exc)
-        return {"status": "error", "reason": str(exc)}
+    return {"status": "ok", "reason": "processing in background"}

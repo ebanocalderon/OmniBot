@@ -3,6 +3,7 @@ Configuration management via pydantic-settings.
 All values are loaded from environment variables (or a .env file).
 """
 from functools import lru_cache
+from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     # ── Chatwoot ──────────────────────────────────────────────────
     chatwoot_base_url: str = Field(..., description="Base URL of the Chatwoot instance (no trailing slash)")
     chatwoot_api_token: str = Field(..., description="Chatwoot Agent Bot access token")
+    chatwoot_user_token: Optional[str] = None
     chatwoot_account_id: int = Field(..., description="Chatwoot numeric account ID")
 
     # ── Server ────────────────────────────────────────────────────

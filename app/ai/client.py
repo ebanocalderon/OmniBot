@@ -171,6 +171,57 @@ TOOLS_SCHEMA = [
                 "properties": {}
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_contact_name",
+            "description": "Save the client's full name to the CRM. Call this immediately after the client provides their name.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The full name of the client."
+                    }
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_contact_phone",
+            "description": "Save the client's phone number to the CRM. Call this immediately after the client provides their phone number.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phone": {
+                        "type": "string",
+                        "description": "The phone number of the client."
+                    }
+                },
+                "required": ["phone"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_contact_email",
+            "description": "Save the client's email address to the CRM. Call this immediately after the client provides their email.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "description": "The email address of the client."
+                    }
+                },
+                "required": ["email"]
+            }
+        }
     }
 ]
 
@@ -190,6 +241,12 @@ async def _execute_tool_call(tool_call, contact_id: Optional[int] = None, chat_i
             email = args.get("email")
             if not email:
                 return "Error: Please specify the 'email' parameter."
+            if contact_id:
+                try:
+                    logger.info("Automatically saving CRM email inside check_existing_bookings contact_id=%s: email=%s", contact_id, email)
+                    await chatwoot_client.update_contact(contact_id, email=email)
+                except Exception as e:
+                    logger.error("Failed to automatically save email inside check_existing_bookings: %s", e)
             return await check_existing_bookings(email)
         elif func_name == "cancel_booking":
             booking_uid = args.get("booking_uid")
@@ -208,7 +265,7 @@ async def _execute_tool_call(tool_call, contact_id: Optional[int] = None, chat_i
             if contact_id:
                 try:
                     logger.info("Updating Chatwoot CRM contact_id=%s with name=%s, email=%s", contact_id, name, email)
-                    await chatwoot_client.update_contact(contact_id, name, email)
+                    await chatwoot_client.update_contact(contact_id, name=name, email=email)
                 except Exception as e:
                     logger.error("Failed to update Chatwoot CRM contact: %s", e)
             
@@ -224,6 +281,39 @@ async def _execute_tool_call(tool_call, contact_id: Optional[int] = None, chat_i
                     logger.error("Failed to trigger booking notification task: %s", ex)
                     
             return booking_result
+        elif func_name == "save_contact_name":
+            name = args.get("name")
+            if contact_id and name:
+                try:
+                    logger.info("Executing tool save_contact_name with args %s", args)
+                    await chatwoot_client.update_contact(contact_id, name=name)
+                    return "Success: Contact name successfully updated in the CRM."
+                except Exception as e:
+                    logger.error("Failed to save contact name to CRM: %s", e)
+                    return f"Error saving contact name: {e}"
+            return "Error: contact_id or name not provided."
+        elif func_name == "save_contact_phone":
+            phone = args.get("phone")
+            if contact_id and phone:
+                try:
+                    logger.info("Executing tool save_contact_phone with args %s", args)
+                    await chatwoot_client.update_contact(contact_id, phone_number=phone)
+                    return "Success: Contact phone successfully updated in the CRM."
+                except Exception as e:
+                    logger.error("Failed to save contact phone to CRM: %s", e)
+                    return f"Error saving contact phone: {e}"
+            return "Error: contact_id or phone not provided."
+        elif func_name == "save_contact_email":
+            email = args.get("email")
+            if contact_id and email:
+                try:
+                    logger.info("Executing tool save_contact_email with args %s", args)
+                    await chatwoot_client.update_contact(contact_id, email=email)
+                    return "Success: Contact email successfully updated in the CRM."
+                except Exception as e:
+                    logger.error("Failed to save contact email to CRM: %s", e)
+                    return f"Error saving contact email: {e}"
+            return "Error: contact_id or email not provided."
         elif func_name == "handoff_to_human":
             if chat_id:
                 try:
@@ -394,6 +484,22 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
                     tool_result = await check_existing_bookings(args.get("email"))
                 elif func_name == "cancel_booking":
                     tool_result = await cancel_booking(args.get("booking_uid"))
+                elif func_name == "save_contact_info":
+                    name = args.get("name")
+                    phone = args.get("phone")
+                    email = args.get("email")
+                    if not name and not phone and not email:
+                        tool_result = "Error: At least one contact parameter ('name', 'phone', 'email') must be provided."
+                    elif contact_id:
+                        try:
+                            logger.info("Saving contact info for CRM contact_id=%s: name=%s, phone=%s, email=%s (fallback)", contact_id, name, phone, email)
+                            await chatwoot_client.update_contact(contact_id, name=name, email=email, phone_number=phone)
+                            tool_result = "Success: Contact information successfully updated in the CRM."
+                        except Exception as e:
+                            logger.error("Failed to save contact info to CRM (fallback): %s", e)
+                            tool_result = f"Error saving contact info: {e}"
+                    else:
+                        tool_result = "Error: contact_id not provided for saving contact info."
                 elif func_name == "book_appointment":
                     name = args.get("name")
                     email = args.get("email")
@@ -406,7 +512,7 @@ async def get_ai_response(chat_id: int, user_message: str, contact_id: Optional[
                         if contact_id:
                             try:
                                 logger.info("Updating Chatwoot CRM contact_id=%s with name=%s, email=%s (fallback)", contact_id, name, email)
-                                await chatwoot_client.update_contact(contact_id, name, email)
+                                await chatwoot_client.update_contact(contact_id, name=name, email=email)
                             except Exception as e:
                                 logger.error("Failed to update Chatwoot CRM contact (fallback): %s", e)
                                 

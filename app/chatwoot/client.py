@@ -108,25 +108,49 @@ class ChatwootClient:
     async def update_contact(
         self,
         contact_id: int,
-        name: str,
-        email: str,
+        name: Optional[str] = None,
+        email: Optional[str] = None,
+        phone_number: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Update contact details (name and email) in Chatwoot CRM.
+        Update contact details (name, email, and/or phone) in Chatwoot CRM.
         """
         url = _api(f"/contacts/{contact_id}")
-        body = {
-            "name": name,
-            "email": email,
-        }
-        resp = await self._http.put(url, json=body)
+        body = {}
+        if name:
+            body["name"] = name
+        if email:
+            body["email"] = email
+        if phone_number:
+            # Clean non-digits (except optional leading +)
+            cleaned = "".join(c for c in phone_number if c.isdigit() or c == "+")
+            if not cleaned.startswith("+"):
+                if len(cleaned) == 10:
+                    cleaned = f"+1{cleaned}"
+                elif len(cleaned) == 11 and cleaned.startswith("1"):
+                    cleaned = f"+{cleaned}"
+                else:
+                    cleaned = f"+1{cleaned}"
+            body["phone_number"] = cleaned
+            
+        if not body:
+            logger.warning("update_contact called with empty body for contact_id=%s", contact_id)
+            return {}
+            
+        headers = _HEADERS.copy()
+        if settings.chatwoot_user_token:
+            headers["api_access_token"] = settings.chatwoot_user_token
+            
+        resp = await self._http.put(url, json=body, headers=headers)
+        
+        # If the email already exists for another contact, Chatwoot may return 422
         resp.raise_for_status()
+        
         contact = resp.json()
         logger.info(
-            "Updated Chatwoot contact id=%s name=%s email=%s",
+            "Updated Chatwoot contact id=%s: %s",
             contact_id,
-            name,
-            email,
+            body,
         )
         return contact
 

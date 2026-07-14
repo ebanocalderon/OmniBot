@@ -1,6 +1,10 @@
-# Development Conventions
+# OmniBot Development Conventions
 
-All agent instructions and project conventions have moved to [`.agents/AGENTS.md`](.agents/AGENTS.md) following progressive disclosure principles.
+OmniBot is an AI agent bridge for Chatwoot.
 
-## Git Workflow
-- **Git Commits**: Do NOT automatically commit to GitHub or push changes on your own. ONLY make commits and pushes when explicitly requested by the user.
+All agent instructions and project conventions are structured following progressive disclosure principles. For detailed instructions, refer to the documents in the `docs/` folder.
+
+## Agent Documentation
+
+- [Git Workflow](docs/git-workflow.md)
+
